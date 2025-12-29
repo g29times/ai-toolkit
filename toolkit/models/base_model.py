@@ -791,6 +791,32 @@ class BaseModel:
             raise ValueError(
                 "Either text_embeddings or conditional_embeddings must be specified")
         if text_embeddings is None and unconditional_embeddings is not None:
+            # When caching text embeddings, unconditional embeddings (e.g. empty / negative prompt)
+            # may be provided as a single cached embedding (batch=1) while conditional embeddings
+            # are batched. Expand unconditional to match conditional before concatenation.
+            try:
+                if conditional_embeddings is not None:
+                    if isinstance(conditional_embeddings.text_embeds, list):
+                        if len(conditional_embeddings.text_embeds[0].shape) == 2:
+                            cond_bs = len(conditional_embeddings.text_embeds)
+                        else:
+                            cond_bs = conditional_embeddings.text_embeds[0].shape[0]
+                    else:
+                        cond_bs = conditional_embeddings.text_embeds.shape[0]
+
+                    if isinstance(unconditional_embeddings.text_embeds, list):
+                        if len(unconditional_embeddings.text_embeds[0].shape) == 2:
+                            uncond_bs = len(unconditional_embeddings.text_embeds)
+                        else:
+                            uncond_bs = unconditional_embeddings.text_embeds[0].shape[0]
+                    else:
+                        uncond_bs = unconditional_embeddings.text_embeds.shape[0]
+
+                    if uncond_bs == 1 and cond_bs > 1:
+                        unconditional_embeddings = unconditional_embeddings.expand_to_batch(cond_bs)
+            except Exception:
+                # If expansion fails, fall back to existing behavior and allow downstream checks to raise.
+                pass
             text_embeddings = concat_prompt_embeds([
                 unconditional_embeddings,  # negative embedding
                 conditional_embeddings,  # positive embedding
