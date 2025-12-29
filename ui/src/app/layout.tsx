@@ -29,7 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={inter.className}>
         <ThemeProvider>
           <AuthWrapper authRequired={authRequired}>
-            <div className="flex h-screen bg-gray-950">
+            <div className="flex flex-row-reverse h-screen bg-gray-950">
               <Sidebar />
               <main className="flex-1 overflow-auto bg-gray-950 text-gray-100 relative">
                 <Suspense>{children}</Suspense>
