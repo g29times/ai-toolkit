@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import json
 import os
 import sqlite3
 import asyncio
@@ -8,6 +9,7 @@ from typing import Literal, Optional
 import threading
 import time
 import signal
+import urllib.request
 
 AITK_Status = Literal["running", "stopped", "error", "completed"]
 
@@ -26,6 +28,7 @@ class UITrainer(SDTrainer):
         if self.job_id is None:
             raise Exception("AITK_JOB_ID not set")
         self.is_stopping = False
+        self._train_start_time = None
         # Create a thread pool for database operations
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         # Track all async tasks
@@ -34,6 +37,41 @@ class UITrainer(SDTrainer):
         self._run_async_operation(self._update_status("running", "Starting"))
         self._stop_watcher_started = False
         # self.start_stop_watcher(interval_sec=2.0)
+
+    def _format_duration_minutes(self, seconds: Optional[float]) -> str:
+        if seconds is None:
+            return "未知"
+        try:
+            minutes = int(round(float(seconds) / 60.0))
+            return str(minutes)
+        except Exception:
+            return "未知"
+
+    def _send_feishu_webhook(self, title: str, text: str):
+        webhook_url = os.environ.get('FEISHU_WEBHOOK_URL', None)
+        webhook_url = webhook_url.strip() if webhook_url is not None else None
+        if not webhook_url:
+            return
+
+        payload = {
+            'msg_type': 'text',
+            'content': {
+                'text': f"{title}\n{text}" if title else (text or '')
+            }
+        }
+
+        try:
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                webhook_url,
+                data=data,
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp.read()
+        except Exception as e:
+            print(f"Feishu webhook send failed: {e}")
     
     def start_stop_watcher(self, interval_sec: float = 5.0):
         """
@@ -219,6 +257,15 @@ class UITrainer(SDTrainer):
         super(UITrainer, self).on_error(e)
         if self.accelerator.is_main_process and not self.is_stopping:
             self.update_status("error", str(e))
+            elapsed_sec = None
+            if self._train_start_time is not None:
+                elapsed_sec = time.time() - self._train_start_time
+            minutes = self._format_duration_minutes(elapsed_sec)
+            step = getattr(self, 'step_num', None)
+            title = f"{self.job.name} 失败"
+            reason = str(e) if e is not None else "Unknown error"
+            text = f"失败原因: {reason}\n耗时 {minutes} 分钟，{step}步"
+            self._send_feishu_webhook(title=title, text=text)
         self.update_db_key("step", self.last_save_step)
         asyncio.run(self.wait_for_all_async())
         self.thread_pool.shutdown(wait=True)
@@ -239,6 +286,15 @@ class UITrainer(SDTrainer):
     def done_hook(self):
         super(UITrainer, self).done_hook()
         self.update_status("completed", "Training completed")
+        if self.accelerator.is_main_process:
+            elapsed_sec = None
+            if self._train_start_time is not None:
+                elapsed_sec = time.time() - self._train_start_time
+            minutes = self._format_duration_minutes(elapsed_sec)
+            step = getattr(self, 'step_num', None)
+            title = f"{self.job.name} 成功"
+            text = f"耗时 {minutes} 分钟，{step}步"
+            self._send_feishu_webhook(title=title, text=text)
         # Wait for all async operations to finish before shutting down
         asyncio.run(self.wait_for_all_async())
         self.thread_pool.shutdown(wait=True)
@@ -264,6 +320,8 @@ class UITrainer(SDTrainer):
         self.update_step()
         self.update_status("running", "Training")
         self.timer.add_after_print_hook(self.handle_timing_print_hook)
+        if self.accelerator.is_main_process and self._train_start_time is None:
+            self._train_start_time = time.time()
 
     def status_update_hook_func(self, string):
         self.update_status("running", string)
