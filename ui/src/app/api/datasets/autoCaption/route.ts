@@ -98,25 +98,31 @@ export async function POST(request: Request) {
       );
     }
 
-    const pythonBin = 'python';
+    const args = [
+      scriptPath,
+      '--filelist',
+      tmpFile,
+      '--prompt',
+      DEFAULT_PROMPT,
+      '--batch-size',
+      '1',
+      '--num-workers',
+      '0',
+      '--max-new-tokens',
+      '256',
+    ];
 
-    const { code, stdout, stderr } = await runCommand(
-      pythonBin,
-      [
-        scriptPath,
-        '--filelist',
-        tmpFile,
-        '--prompt',
-        DEFAULT_PROMPT,
-        '--batch-size',
-        '1',
-        '--num-workers',
-        '0',
-        '--max-new-tokens',
-        '256',
-      ],
-      { cwd: repoRoot },
-    );
+    const pythonBins = ['python3', 'python'];
+
+    let lastResult: { code: number | null; stdout: string; stderr: string } | null = null;
+    for (const pythonBin of pythonBins) {
+      lastResult = await runCommand(pythonBin, args, { cwd: repoRoot });
+      if (lastResult.code === 0) break;
+    }
+
+    const code = lastResult?.code ?? 1;
+    const stdout = lastResult?.stdout ?? '';
+    const stderr = lastResult?.stderr ?? '';
 
     try {
       fs.unlinkSync(tmpFile);
