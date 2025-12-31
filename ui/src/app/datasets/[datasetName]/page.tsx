@@ -15,6 +15,9 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
   const usableParams = use(params as any) as { datasetName: string };
   const datasetName = usableParams.datasetName;
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
+  const [autoCaptionMessage, setAutoCaptionMessage] = useState<string | null>(null);
+  const [captionRefreshNonce, setCaptionRefreshNonce] = useState(0);
 
   const refreshImageList = (dbName: string) => {
     setStatus('loading');
@@ -90,6 +93,37 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     );
   }, [status, imgList.length]);
 
+  const handleAutoCaption = async () => {
+    if (!datasetName || isAutoCaptioning) return;
+
+    setIsAutoCaptioning(true);
+    setAutoCaptionMessage(null);
+    try {
+      const data = await apiClient
+        .post(
+          '/api/datasets/autoCaption',
+          { datasetName },
+          {
+            timeout: 0,
+          },
+        )
+        .then(res => res.data);
+
+      if (data?.success) {
+        setAutoCaptionMessage(`Auto caption complete (${data?.images ?? 0} images).`);
+        refreshImageList(datasetName);
+        setCaptionRefreshNonce(n => n + 1);
+      } else {
+        setAutoCaptionMessage('Auto caption failed.');
+      }
+    } catch (error) {
+      console.error('Auto caption failed:', error);
+      setAutoCaptionMessage('Auto caption failed. Check server logs for details.');
+    } finally {
+      setIsAutoCaptioning(false);
+    }
+  };
+
   return (
     <>
       {/* Fixed top bar */}
@@ -111,14 +145,24 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
             Add Images
           </Button>
         </div>
+        <div className="ml-2">
+          <Button
+            className="text-gray-200 bg-slate-600 px-3 py-1 rounded-md disabled:opacity-50"
+            disabled={isAutoCaptioning}
+            onClick={handleAutoCaption}
+          >
+            {isAutoCaptioning ? 'Auto Captioning...' : 'Auto Caption'}
+          </Button>
+        </div>
       </TopBar>
       <MainContent>
+        {autoCaptionMessage && <div className="mb-3 text-sm text-gray-300">{autoCaptionMessage}</div>}
         {PageInfoContent}
         {status === 'success' && imgList.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {imgList.map(img => (
               <DatasetImageCard
-                key={img.img_path}
+                key={`${img.img_path}:${captionRefreshNonce}`}
                 alt="image"
                 imageUrl={img.img_path}
                 onDelete={() => refreshImageList(datasetName)}
