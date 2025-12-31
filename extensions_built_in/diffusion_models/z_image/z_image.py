@@ -177,6 +177,70 @@ class ZImageModel(BaseModel):
             if self.model_config.qtype == "qfloat8":
                 self.model_config.qtype = "float8"
 
+        # load user lora if specified (inference)
+        if self.model_config.lora_path is not None:
+            self.print_and_status_update("Loading LoRA")
+            lora_path = self.model_config.lora_path
+            if not os.path.exists(lora_path):
+                # assume it is a hub path
+                lora_splits = lora_path.split("/")
+                if len(lora_splits) != 3:
+                    raise ValueError(
+                        f"LoRA path {lora_path} is not a valid local path or hub path."
+                    )
+                repo_id = "/".join(lora_splits[:2])
+                filename = lora_splits[2]
+                try:
+                    lora_path = huggingface_hub.hf_hub_download(
+                        repo_id=repo_id,
+                        filename=filename,
+                    )
+                    self.model_config.lora_path = lora_path
+                except Exception as e:
+                    raise ValueError(f"Failed to download LoRA from {lora_path}: {e}")
+
+            lora_state_dict = load_file(lora_path)
+            if hasattr(self, "convert_lora_weights_before_load"):
+                lora_state_dict = self.convert_lora_weights_before_load(lora_state_dict)
+
+            linear_dim = None
+            for key, value in lora_state_dict.items():
+                if "lora_A" in key:
+                    linear_dim = int(value.shape[0])
+                    break
+            if linear_dim is None:
+                raise ValueError(f"Could not infer LoRA rank from {lora_path}")
+
+            network_config = NetworkConfig(
+                type="lora",
+                linear=linear_dim,
+                linear_alpha=linear_dim,
+                transformer_only=True,
+            )
+
+            LoRASpecialNetwork.LORA_PREFIX_UNET = "lora_transformer"
+            network = LoRASpecialNetwork(
+                text_encoder=None,
+                unet=transformer,
+                lora_dim=network_config.linear,
+                multiplier=1.0,
+                alpha=network_config.linear_alpha,
+                train_unet=True,
+                train_text_encoder=False,
+                network_config=network_config,
+                network_type=network_config.type,
+                transformer_only=network_config.transformer_only,
+                is_transformer=True,
+                target_lin_modules=self.target_lora_modules,
+            )
+            network.apply_to(None, transformer, apply_text_encoder=False, apply_unet=True)
+            network.force_to(self.device_torch, dtype=self.torch_dtype)
+            network._update_torch_multiplier()
+            network.load_weights(lora_state_dict)
+            network.eval()
+            network.is_active = True
+            self.network = network
+
         if self.model_config.quantize:
             self.print_and_status_update("Quantizing Transformer")
             quantize_model(self, transformer)
