@@ -1,0 +1,32 @@
+---
+# 生图流程
+job: generate
+config:
+  name: "generate_zimage_turbo_lora_cowboy_bebop_v6"
+  process:
+    - type: to_folder
+      output_folder: "/teamspace/studios/this_studio/ai-toolkit/output/lora_cowboy_bebop_v6/image_gen"
+      device: cuda:0
+      generate:
+        sampler: "flowmatch"
+        width: 768
+        height: 1024
+        neg: ""
+        seed: 42
+        guidance_scale: 5
+        sample_steps: 20
+        guidance_rescale: 0.0
+        ext: "png"
+        prompt_file: true
+        prompts:
+          - "digital illustration, semi-realistic anime style, young woman with long wavy purple hair, winking with a playful smile, wearing a black spaghetti strap tank top under a heavy red unbuttoned jacket, blue denim shorts, silver hoop earrings. Background: lush green bamboo leaves, dim night atmosphere with neon pink and purple lights in the corner, soft cinematic lighting. Vibe: grainy film texture, nostalgic 90s aesthetic, detailed hair strands, upper body focus, relaxed pose, high contrast between the red jacket and green foliage."
+      model:
+        name_or_path: "Tongyi-MAI/Z-Image-Turbo"
+        arch: "zimage:turbo"
+        dtype: bf16
+        quantize: true
+        quantize_te: true
+        low_vram: true
+        qtype: "qfloat8"
+        assistant_lora_path: "ostris/zimage_turbo_training_adapter/zimage_turbo_training_adapter_v2.safetensors"
+        lora_path: "/teamspace/studios/this_studio/ai-toolkit/output/lora_cowboy_bebop_v6/lora_cowboy_bebop_v6.safetensors"

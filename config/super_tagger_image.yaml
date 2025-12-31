@@ -1,0 +1,13 @@
+# 打标流程
+job: extension
+config:
+  name: super_tagger_image
+  process:
+    - type: super_tagger
+      device: cuda:0
+      dataset_paths:
+        - /teamspace/studios/this_studio/ai-toolkit/datasets/test
+      steps:
+        - caption
+      caption_method: "llava:default"
+      force_reprocess_img: false
